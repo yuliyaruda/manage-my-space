@@ -1,0 +1,112 @@
+version: '3.4'
+
+services:
+  
+  sql2017:
+    container_name: ts-sql2017
+    image: mcr.microsoft.com/mssql/server
+    environment:
+        SA_PASSWORD: "!QAZ2wsx"
+        ACCEPT_EULA: "Y"
+    ports:
+      - 1433:1433
+  
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3-management
+    environment:
+        RABBITMQ_ERLANG_COOKIE: "s3cr3tc00ki3"
+        RABBITMQ_DEFAULT_USER: "guest"
+        RABBITMQ_DEFAULT_PASS: "guest"
+    ports:
+        - 5672:5672
+        - 15672:15672
+  
+  activity-service:
+    container_name: activity-service
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Docker"
+    restart: on-failure
+    links: 
+      - rabbitmq
+      - sql2017
+      - elasticsearch
+    build:
+      context: .
+      target: activity-service
+      dockerfile: ActivityService.Dockerfile
+    ports:
+      - 5005:80
+    depends_on: 
+      - sql2017
+      - rabbitmq
+      - elasticsearch
+    entrypoint: ./wait-for-it.sh rabbitmq:5672 -t 60 -- dotnet ManageMySpace.ActivityService.dll
+  
+  user-service:
+    container_name: user-service
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Docker"
+    restart: on-failure
+    links: 
+      - rabbitmq
+      - sql2017
+      - elasticsearch
+    build:
+      context: .
+      target: user-service
+      dockerfile: UserService.Dockerfile
+    ports:
+      - 5006:80
+    depends_on: 
+      - sql2017
+      - rabbitmq
+      - elasticsearch
+    entrypoint: ./wait-for-it.sh rabbitmq:5672 -t 60 -- dotnet ManageMySpace.UserService.dll
+  
+  mail-notification-service:
+    container_name: mail-notification-service
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Docker"
+    restart: on-failure
+    links: 
+      - rabbitmq
+      - sql2017
+      - elasticsearch
+    build:
+      context: .
+      target: mail-notification-service
+      dockerfile: MailNotificationService.Dockerfile
+    depends_on: 
+      - sql2017
+      - rabbitmq
+      - elasticsearch
+    entrypoint: ./wait-for-it.sh rabbitmq:5672 -t 60 -- dotnet ManageMySpace.MailNotificationService.dll
+  
+  elasticsearch:
+    container_name: elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.6.2
+    ports:
+      - 9200:9200
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    environment:
+      - xpack.monitoring.enabled=true
+      - xpack.watcher.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - discovery.type=single-node
+    
+  kibana:
+    container_name: kibana
+    image: docker.elastic.co/kibana/kibana:7.6.2
+    links: 
+      - elasticsearch
+    ports:
+      - 5601:5601
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_URL=http://localhost:9200
+
+volumes:
+  elasticsearch-data:
